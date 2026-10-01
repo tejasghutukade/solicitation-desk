@@ -54,7 +54,10 @@ export function SolicitationTable({
                   </span>
                 </span>
                 <span className="scan-side">
-                  <span className={soon ? "scan-date is-stamp" : "scan-date"}>{formatDeskDate(row.returnBy)}</span>
+                  <span className="scan-deadline">
+                    <span className="scan-date-label">Return by</span>
+                    <span className={soon ? "scan-date is-stamp" : "scan-date"}>{formatDeskDate(row.returnBy)}</span>
+                  </span>
                   <span className="scan-chip">{SET_ASIDE_LABELS[row.setAside]}</span>
                   <span className="scan-qty">{quantityAndUnit(row)}</span>
                 </span>

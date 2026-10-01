@@ -100,6 +100,13 @@ type IndexRecord = {
   fsc: string | null;
 };
 
+function todayIso(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 function expandYear(year: number): number {
   return year <= 69 ? 2000 + year : 1900 + year;
 }
@@ -344,8 +351,8 @@ export class SolicitationDesk {
     const sql = `SELECT solicitation_number, nsn, short_name, quantity, unit, return_by, set_aside, posted_date
       FROM solicitations
       WHERE ${clauses.join(" AND ")}
-      ORDER BY return_by ASC, solicitation_number ASC`;
-    return this.db.prepare(sql).all(...params).map((record) => toRow(record as SqlRow));
+      ORDER BY CASE WHEN return_by < ? THEN 1 ELSE 0 END, return_by ASC, solicitation_number ASC`;
+    return this.db.prepare(sql).all(...params, todayIso()).map((record) => toRow(record as SqlRow));
   }
 
   async open(solicitationNumber: string): Promise<SolicitationBrief> {

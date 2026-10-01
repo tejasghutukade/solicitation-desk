@@ -1,6 +1,6 @@
 import { SET_ASIDE_LABELS, recordPageUrl } from "@/lib/desk/types";
 import type { SolicitationRow } from "@/lib/desk/types";
-import { formatDeskDate, isDueSoon } from "./format";
+import { formatDeskDate, isDueSoon, isPastDeadline } from "./format";
 
 export function SolicitationTable({
   rows,
@@ -36,7 +36,9 @@ export function SolicitationTable({
       <ul className="scan-list">
         {rows.map((row) => {
           const selected = row.solicitationNumber === selectedNumber;
-          const soon = isDueSoon(row.returnBy);
+          const past = isPastDeadline(row.returnBy);
+          const soon = !past && isDueSoon(row.returnBy);
+          const dateClass = past ? "scan-date is-late" : soon ? "scan-date is-stamp" : "scan-date";
           return (
             <li key={row.solicitationNumber} className={selected ? "scan-item is-selected" : "scan-item"}>
               <button
@@ -56,7 +58,7 @@ export function SolicitationTable({
                 <span className="scan-side">
                   <span className="scan-deadline">
                     <span className="scan-date-label">Return by</span>
-                    <span className={soon ? "scan-date is-stamp" : "scan-date"}>{formatDeskDate(row.returnBy)}</span>
+                    <span className={dateClass}>{formatDeskDate(row.returnBy)}</span>
                   </span>
                   <span className="scan-chip">{SET_ASIDE_LABELS[row.setAside]}</span>
                   <span className="scan-qty">{quantityAndUnit(row)}</span>

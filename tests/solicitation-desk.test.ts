@@ -102,6 +102,73 @@ function numbers(rows: Array<{ solicitationNumber: string }>): string[] {
   return rows.map((row) => row.solicitationNumber);
 }
 
+test("open return-by dates stay ahead of expired ones", () => {
+  const desk = newDesk();
+  const today = new Date();
+  const shift = (days: number) => {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + days);
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const year = String(date.getFullYear()).slice(2);
+    return `${month}/${day}/${year}`;
+  };
+  desk.ingestIndexFile(
+    "in260401.txt",
+    [
+      fixedLine({
+        solicitation: "SPE1C126T0001",
+        nsn: "5305012345678",
+        purchaseRequest: "PR00000000001",
+        returnBy: shift(-3),
+        pdfName: "SPE1C126T0001.PDF",
+        quantity: "1",
+        unit: "EA",
+        shortName: "EXPIRED BOLT",
+        buyerCode: "AB123",
+        amsc: "G",
+        itemType: "1",
+        setAside: "Y",
+        setAsidePercent: "100",
+      }),
+      fixedLine({
+        solicitation: "SPE1C126T0002",
+        nsn: "5305012345679",
+        purchaseRequest: "PR00000000002",
+        returnBy: shift(10),
+        pdfName: "SPE1C126T0002.PDF",
+        quantity: "1",
+        unit: "EA",
+        shortName: "LATER BOLT",
+        buyerCode: "AB123",
+        amsc: "G",
+        itemType: "1",
+        setAside: "Y",
+        setAsidePercent: "100",
+      }),
+      fixedLine({
+        solicitation: "SPE1C126T0003",
+        nsn: "5305012345680",
+        purchaseRequest: "PR00000000003",
+        returnBy: shift(2),
+        pdfName: "SPE1C126T0003.PDF",
+        quantity: "1",
+        unit: "EA",
+        shortName: "SOON BOLT",
+        buyerCode: "AB123",
+        amsc: "G",
+        itemType: "1",
+        setAside: "Y",
+        setAsidePercent: "100",
+      }),
+    ].join("\n"),
+  );
+  assert.deepEqual(numbers(desk.query(openingQuery("hardware"))), [
+    "SPE1C126T0003",
+    "SPE1C126T0002",
+    "SPE1C126T0001",
+  ]);
+});
+
 test("ingests a daily index and lists the soonest return-by first", () => {
   const bolt = INDEX_260401.split("\n")[0] ?? "";
   const skippedSetAside = `SPE9Z126T0000${bolt.slice(13, 136)}X${bolt.slice(137)}`;

@@ -622,6 +622,10 @@ body {
   color: var(--stamp);
 }
 
+.is-late {
+  color: var(--fail);
+}
+
 .is-ready {
   color: var(--ready);
 }

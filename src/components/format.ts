@@ -32,13 +32,22 @@ export function formatDeskDateOrBlank(value: string | null | undefined): string 
   return formatDeskDate(value.trim());
 }
 
-export function isDueSoon(value: string, now = new Date()): boolean {
+function daysUntil(value: string, now: Date): number | null {
   const date = parseCalendarDate(value);
-  if (!date) return false;
+  if (!date) return null;
   const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const target = Date.UTC(date.year, date.month - 1, date.day);
-  const ahead = (target - today) / 86_400_000;
-  return ahead >= 0 && ahead <= 7;
+  return (target - today) / 86_400_000;
+}
+
+export function isPastDeadline(value: string, now = new Date()): boolean {
+  const ahead = daysUntil(value, now);
+  return ahead !== null && ahead < 0;
+}
+
+export function isDueSoon(value: string, now = new Date()): boolean {
+  const ahead = daysUntil(value, now);
+  return ahead !== null && ahead >= 0 && ahead <= 7;
 }
 
 export function yesNo(value: boolean | null): string {

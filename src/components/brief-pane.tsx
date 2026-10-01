@@ -1,6 +1,6 @@
 import { SET_ASIDE_LABELS, recordPageUrl } from "@/lib/desk/types";
 import type { SolicitationBrief, SolicitationRow } from "@/lib/desk/types";
-import { formatDeskDate, formatDeskDateOrBlank, isDueSoon, statusLooksOpen, yesNo } from "./format";
+import { formatDeskDate, formatDeskDateOrBlank, isDueSoon, isPastDeadline, statusLooksOpen, yesNo } from "./format";
 
 export function BriefPane({
   row,
@@ -20,7 +20,9 @@ export function BriefPane({
   const view = brief ?? row;
   const ready = brief?.loadState === "ready" ? brief : null;
   const name = ready?.fullName?.trim() ? ready.fullName : view.shortName;
-  const soon = isDueSoon(view.returnBy);
+  const past = isPastDeadline(view.returnBy);
+  const soon = !past && isDueSoon(view.returnBy);
+  const stampClass = past ? "return-stamp is-late" : soon ? "return-stamp is-stamp" : "return-stamp";
 
   const pageUrl = brief?.recordPageUrl || recordPageUrl(row.solicitationNumber);
 
@@ -32,7 +34,7 @@ export function BriefPane({
           Close
         </button>
       </div>
-      <p className={soon ? "return-stamp is-stamp" : "return-stamp"}>{formatDeskDate(view.returnBy)}</p>
+      <p className={stampClass}>{formatDeskDate(view.returnBy)}</p>
       <div className="brief-actions">
         <a className="brief-action" href={pageUrl} target="_blank" rel="noreferrer">
           DIBBS page

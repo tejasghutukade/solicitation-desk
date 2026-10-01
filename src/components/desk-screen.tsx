@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { listSolicitations, openSolicitation } from "@/app/actions";
+import { listSolicitations, openSolicitation, pullPostedDay } from "@/app/actions";
 import { EVERY_SET_ASIDE } from "@/lib/desk/types";
 import type { DeskQuery, SetAside, SolicitationBrief, SolicitationRow, Supplier } from "@/lib/desk/types";
 import { BriefPane } from "./brief-pane";
 import { FilterStrip } from "./filter-strip";
-import { solicitationCount } from "./format";
+import { formatDeskDate, solicitationCount } from "./format";
 import { SolicitationTable } from "./solicitation-table";
 
 const SHOPS: { id: Supplier; label: string }[] = [
@@ -30,6 +30,11 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
     failed: boolean;
   } | null>(null);
   const openSeq = useRef(0);
+  const [pullDay, setPullDay] = useState("");
+  const [pulling, setPulling] = useState(false);
+  const [pullStatus, setPullStatus] = useState<string | null>(null);
+  const [listVersion, setListVersion] = useState(0);
+  const pullSeq = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -50,7 +55,28 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
     return () => {
       active = false;
     };
-  }, [query]);
+  }, [query, listVersion]);
+
+  function requestPull() {
+    if (!pullDay || pulling) return;
+    const seq = ++pullSeq.current;
+    const day = pullDay;
+    setPulling(true);
+    setPullStatus(`Pulling ${formatDeskDate(day)}`);
+    pullPostedDay(day).then(
+      (result) => {
+        if (pullSeq.current !== seq) return;
+        setPulling(false);
+        setPullStatus(`Stored ${solicitationCount(result.solicitations)} from ${formatDeskDate(result.postedDate)}`);
+        setListVersion((version) => version + 1);
+      },
+      (error: unknown) => {
+        if (pullSeq.current !== seq) return;
+        setPulling(false);
+        setPullStatus(error instanceof Error ? error.message : "That day's index could not be stored.");
+      },
+    );
+  }
 
   function chooseShop(supplier: Supplier) {
     if (supplier === query.supplier) return;
@@ -119,6 +145,30 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
             setQuery((current) => ({ ...current, setAsides: toggleSetAside(current.setAsides, code) }))
           }
         />
+        <div className="day-pull">
+          <label className="desk-field" htmlFor="pull-posted-day">
+            Add a posted day
+            <input
+              id="pull-posted-day"
+              type="date"
+              value={pullDay}
+              onChange={(event) => setPullDay(event.target.value)}
+            />
+          </label>
+          <button type="button" className="desk-text-button" disabled={!pullDay || pulling} onClick={requestPull}>
+            {pulling ? "Pulling…" : "Pull this day"}
+          </button>
+          {pullStatus ? (
+            <p
+              className={
+                pulling || pullStatus.startsWith("Stored") ? "day-pull-status" : "day-pull-status is-fail"
+              }
+              role="status"
+            >
+              {pullStatus}
+            </p>
+          ) : null}
+        </div>
         <SolicitationTable
           rows={visibleRows}
           loading={rows === null && !listError}

@@ -266,6 +266,29 @@ export class SolicitationDesk {
     }
   }
 
+  async pullPostedDay(isoDate: string): Promise<{ postedDate: string; solicitations: number }> {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
+    if (!match) throw new Error("Choose a posted day.");
+    const fileName = `in${match[1].slice(2)}${match[2]}${match[3]}.txt`;
+    let text: string;
+    try {
+      text = await this.gateway.fetchIndexFile(fileName);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`DIBBS could not provide the index for ${isoDate}. ${reason}`);
+    }
+    if (!text.trim()) throw new Error(`DIBBS returned an empty index for ${isoDate}.`);
+    this.ingestIndexFile(fileName, text);
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM solicitations WHERE posted_date = ?")
+      .get(isoDate) as SqlRow | undefined;
+    const solicitations = Number(row?.count ?? 0);
+    if (solicitations === 0) {
+      throw new Error(`DIBBS index for ${isoDate} did not contain any solicitations.`);
+    }
+    return { postedDate: isoDate, solicitations };
+  }
+
   async ensureReady(): Promise<void> {
     if (this.storedCount() > 0) return;
     let files;

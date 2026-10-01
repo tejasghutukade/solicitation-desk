@@ -31,6 +31,10 @@ export function listSolicitations(query: DeskQuery): SolicitationRow[] {
   return getDesk().query(query);
 }
 
+export async function pullPostedDay(isoDate: string): Promise<{ postedDate: string; solicitations: number }> {
+  return getDesk().pullPostedDay(isoDate);
+}
+
 export async function openSolicitation(solicitationNumber: string): Promise<SolicitationBrief> {
   return getDesk().open(solicitationNumber);
 }

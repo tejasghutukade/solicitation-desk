@@ -228,6 +228,15 @@ export class LiveDibbsGateway implements DibbsGateway {
     return files;
   }
 
+  async fetchIndexFile(fileName: string): Promise<string> {
+    if (!/^in\d{6}\.txt$/i.test(fileName)) {
+      throw new Error(`Index file name ${fileName} is not a daily index.`);
+    }
+    const url = `https://dibbs2.bsm.dla.mil/Downloads/RFQ/Archive/${fileName}`;
+    const file = await getWithConsent(this.jar, url);
+    return decodeText(file.bytes, file.contentType);
+  }
+
   async fetchSolicitation(solicitationNumber: string): Promise<FetchedSolicitation> {
     const pageUrl = `https://www.dibbs.bsm.dla.mil/Rfq/RfqRec.aspx?sn=${encodeURIComponent(solicitationNumber)}`;
     const page = await getWithConsent(this.jar, pageUrl);

@@ -74,17 +74,27 @@ function unusedGateway(): DibbsGateway {
     async fetchRecentIndexFiles() {
       return [];
     },
+    async fetchIndexFile() {
+      throw new Error("not used");
+    },
     async fetchSolicitation() {
       throw new Error("not used");
     },
   };
 }
 
-function newDesk(gateway: DibbsGateway = unusedGateway()): SolicitationDesk {
+function newDesk(
+  gateway: Omit<DibbsGateway, "fetchIndexFile"> & Partial<Pick<DibbsGateway, "fetchIndexFile">> = unusedGateway(),
+): SolicitationDesk {
   const dir = mkdtempSync(path.join(tmpdir(), "desk-"));
   return new SolicitationDesk({
     databasePath: path.join(dir, "nested", "desk.sqlite"),
-    gateway,
+    gateway: {
+      async fetchIndexFile() {
+        throw new Error("not used");
+      },
+      ...gateway,
+    },
   });
 }
 
@@ -383,4 +393,66 @@ test("a failed record fetch keeps the index fields and a later open can replace 
   assert.equal(ready.loadState, "ready");
   assert.equal(ready.buyerName, "JANE DOE");
   assert.equal(ready.issueDate, "2026-08-25");
+});
+
+test("pulling a posted day stores that index and leaves the recent download alone", async () => {
+  let recentCalls = 0;
+  let indexCalls = 0;
+  const desk = newDesk({
+    async fetchRecentIndexFiles() {
+      recentCalls += 1;
+      return [];
+    },
+    async fetchIndexFile(fileName) {
+      indexCalls += 1;
+      assert.equal(fileName, "in260401.txt");
+      return INDEX_260401;
+    },
+    async fetchSolicitation() {
+      throw new Error("not used");
+    },
+  });
+  const stored = await desk.pullPostedDay("2026-04-01");
+  assert.equal(recentCalls, 0);
+  assert.equal(indexCalls, 1);
+  assert.equal(stored.solicitations, 4);
+  assert.deepEqual(numbers(desk.query({ ...openingQuery("all"), postedDate: "2026-04-01" })), [
+    "SPE7M126T0001",
+    "SPE1C126T1746",
+    "SPE2A126T9999",
+    "SPE4A126P0002",
+  ]);
+
+  const updating = newDesk({
+    async fetchRecentIndexFiles() {
+      return [];
+    },
+    async fetchIndexFile() {
+      return BOLT_UPDATE;
+    },
+    async fetchSolicitation() {
+      throw new Error("not used");
+    },
+  });
+  updating.ingestIndexFile("in260401.txt", INDEX_260401);
+  const again = await updating.pullPostedDay("2026-04-02");
+  assert.equal(again.solicitations, 1);
+  const bolt = updating.query(openingQuery("all")).find((row) => row.solicitationNumber === "SPE1C126T1746");
+  assert.equal(bolt?.quantity, 12);
+  assert.equal(bolt?.postedDate, "2026-04-02");
+
+  const offline = newDesk({
+    async fetchRecentIndexFiles() {
+      return [];
+    },
+    async fetchIndexFile() {
+      throw new Error("offline");
+    },
+    async fetchSolicitation() {
+      throw new Error("not used");
+    },
+  });
+  await assert.rejects(() => offline.pullPostedDay("2026-04-03"), /DIBBS/);
+  assert.equal(offline.query(openingQuery("all")).length, 0);
+  await assert.rejects(() => offline.pullPostedDay("04/03/26"), /Choose a posted day/);
 });

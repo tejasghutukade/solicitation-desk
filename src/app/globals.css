@@ -396,6 +396,21 @@ body {
   animation: scan-shimmer 1.1s ease-in-out infinite;
 }
 
+.day-pull {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.55rem 0.75rem;
+  padding: 0.45rem 1rem 0.55rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.day-pull-status {
+  margin: 0 0 0.28rem;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
 .desk-more {
   padding: 0.65rem 1rem 0.9rem;
 }

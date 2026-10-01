@@ -1,0 +1,145 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { listSolicitations, openSolicitation } from "@/app/actions";
+import { EVERY_SET_ASIDE, openingQuery } from "@/lib/desk/types";
+import type { DeskQuery, SetAside, SolicitationBrief, SolicitationRow, Supplier } from "@/lib/desk/types";
+import { BriefPane } from "./brief-pane";
+import { FilterStrip } from "./filter-strip";
+import { solicitationCount } from "./format";
+import { SolicitationTable } from "./solicitation-table";
+
+const SHOPS: { id: Supplier; label: string }[] = [
+  { id: "hardware", label: "Hardware" },
+  { id: "medical", label: "Medical" },
+  { id: "electrical", label: "Electrical" },
+  { id: "all", label: "All" },
+];
+
+const PAGE_SIZE = 200;
+
+export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
+  const [query, setQuery] = useState(initialQuery);
+  const [rows, setRows] = useState<SolicitationRow[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const [selection, setSelection] = useState<{
+    row: SolicitationRow;
+    brief: SolicitationBrief | null;
+    reading: boolean;
+    failed: boolean;
+  } | null>(null);
+  const openSeq = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    listSolicitations(query).then(
+      (next) => {
+        if (!active) return;
+        setRows(next);
+        setVisible(PAGE_SIZE);
+        setListError(null);
+      },
+      (error: unknown) => {
+        if (!active) return;
+        setRows(null);
+        setVisible(PAGE_SIZE);
+        setListError(error instanceof Error ? error.message : "The solicitations could not be listed.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [query]);
+
+  function chooseShop(supplier: Supplier) {
+    if (supplier === query.supplier) return;
+    openSeq.current += 1;
+    setSelection(null);
+    setQuery(openingQuery(supplier));
+  }
+
+  function openRow(row: SolicitationRow) {
+    const seq = ++openSeq.current;
+    setSelection({ row, brief: null, reading: true, failed: false });
+    openSolicitation(row.solicitationNumber).then(
+      (brief) => {
+        if (openSeq.current !== seq) return;
+        setSelection({ row, brief, reading: false, failed: brief.loadState === "failed" });
+      },
+      () => {
+        if (openSeq.current !== seq) return;
+        setSelection({ row, brief: null, reading: false, failed: true });
+      },
+    );
+  }
+
+  const visibleRows = (rows ?? []).slice(0, visible);
+
+  return (
+    <main className="desk">
+      <section className="desk-list" aria-label="Solicitations">
+        <div className="desk-list-head">
+          <h1>Solicitation desk</h1>
+          <div className="desk-list-tools">
+            <div className="shop-switch" role="group" aria-label="Shop">
+              {SHOPS.map((shop) => (
+                <button
+                  key={shop.id}
+                  type="button"
+                  aria-pressed={query.supplier === shop.id}
+                  onClick={() => chooseShop(shop.id)}
+                >
+                  {shop.label}
+                </button>
+              ))}
+            </div>
+            {listError ? (
+              <p className="desk-count is-fail">{listError}</p>
+            ) : (
+              <p className="desk-count" aria-live="polite">
+                {rows ? solicitationCount(rows.length) : ""}
+              </p>
+            )}
+          </div>
+        </div>
+        <FilterStrip
+          query={query}
+          onSearch={(search) => setQuery((current) => ({ ...current, search }))}
+          onReturnBy={(value) =>
+            setQuery((current) => ({ ...current, returnByOnOrBefore: value || null }))
+          }
+          onPostedDate={(value) => setQuery((current) => ({ ...current, postedDate: value || null }))}
+          onToggleSetAside={(code) =>
+            setQuery((current) => ({ ...current, setAsides: toggleSetAside(current.setAsides, code) }))
+          }
+        />
+        <SolicitationTable
+          rows={visibleRows}
+          selectedNumber={selection?.row.solicitationNumber ?? null}
+          hasMore={rows !== null && rows.length > visible}
+          onOpen={openRow}
+          onShowMore={() => setVisible((count) => count + PAGE_SIZE)}
+        />
+      </section>
+      <section className="desk-brief" aria-label="Brief" aria-busy={selection?.reading ?? false}>
+        <BriefPane
+          row={selection?.row ?? null}
+          brief={selection?.brief ?? null}
+          reading={selection?.reading ?? false}
+          failed={selection?.failed ?? false}
+          onRetry={() => {
+            if (selection) openRow(selection.row);
+          }}
+        />
+      </section>
+    </main>
+  );
+}
+
+function toggleSetAside(current: SetAside[], code: SetAside): SetAside[] {
+  const selected = new Set(current);
+  if (selected.has(code)) selected.delete(code);
+  else selected.add(code);
+  return EVERY_SET_ASIDE.filter((item) => selected.has(item));
+}

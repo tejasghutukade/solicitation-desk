@@ -380,6 +380,10 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.scan-sentinel {
+  height: 1px;
+}
+
 .scan-empty {
   margin: 0;
   padding: 1.2rem 1rem;

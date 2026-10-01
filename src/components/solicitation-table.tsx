@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import { SET_ASIDE_LABELS, recordPageUrl } from "@/lib/desk/types";
 import type { SolicitationRow } from "@/lib/desk/types";
 import { formatDeskDate, isDueSoon, isPastDeadline } from "./format";
@@ -17,6 +20,23 @@ export function SolicitationTable({
   onOpen: (row: SolicitationRow) => void;
   onShowMore: () => void;
 }) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const onShowMoreRef = useRef(onShowMore);
+  onShowMoreRef.current = onShowMore;
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onShowMoreRef.current();
+      },
+      { rootMargin: "320px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, rows.length]);
+
   if (loading) {
     return (
       <div className="scan-scroll" aria-hidden="true">
@@ -76,13 +96,7 @@ export function SolicitationTable({
           );
         })}
       </ul>
-      {hasMore ? (
-        <div className="desk-more">
-          <button type="button" className="desk-text-button" onClick={onShowMore}>
-            Show more
-          </button>
-        </div>
-      ) : null}
+      {hasMore ? <div className="scan-sentinel" ref={sentinelRef} aria-hidden="true" /> : null}
     </div>
   );
 }

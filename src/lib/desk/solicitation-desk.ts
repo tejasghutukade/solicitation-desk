@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue, type SQLOutputValue } from "node:sqlite";
 import type { DibbsGateway } from "./gateway.ts";
+import { readRecord } from "./read-record.ts";
 import {
   HARDWARE_CLASSES,
   recordPageUrl,
@@ -164,6 +165,49 @@ function parseIndexLine(line: string, postedDate: string): IndexRecord | null {
   };
 }
 
+function flag(value: SQLOutputValue): boolean | null {
+  if (value === null || value === undefined) return null;
+  return Number(value) === 1;
+}
+
+function toBrief(record: SqlRow): SolicitationBrief {
+  const row = toRow(record);
+  const codes = record.requirement_codes ? JSON.parse(String(record.requirement_codes)) : [];
+  const hasSource = Number(record.has_approved_source) === 1;
+  const lastPrice = record.last_unit_price ? String(record.last_unit_price) : "";
+  return {
+    ...row,
+    issueDate: record.issue_date ? String(record.issue_date) : null,
+    status: record.status ? String(record.status) : null,
+    fullName: record.full_name ? String(record.full_name) : null,
+    deliverBy: record.deliver_by ? String(record.deliver_by) : null,
+    buyerName: record.buyer_name ? String(record.buyer_name) : null,
+    buyerEmail: record.buyer_email ? String(record.buyer_email) : null,
+    naics: record.naics ? String(record.naics) : null,
+    approvedSource: hasSource
+      ? {
+          company: record.approved_company ? String(record.approved_company) : null,
+          cage: record.approved_cage ? String(record.approved_cage) : null,
+          partNumber: record.approved_part ? String(record.approved_part) : null,
+        }
+      : null,
+    automatedAward: flag(record.automated_award),
+    inspection: record.inspection ? String(record.inspection) : null,
+    buyAmerican: flag(record.buy_american),
+    lastPaid: lastPrice
+      ? {
+          unitPrice: lastPrice,
+          quantity: String(record.last_quantity ?? ""),
+          awardDate: String(record.last_award_date ?? ""),
+        }
+      : null,
+    requirementCodes: Array.isArray(codes) ? codes.map(String) : [],
+    pdfAvailable: record.pdf instanceof Uint8Array && record.pdf.length > 0,
+    recordPageUrl: recordPageUrl(row.solicitationNumber),
+    loadState: record.load_state === "failed" ? "failed" : record.load_state === "ready" ? "ready" : "index-only",
+  };
+}
+
 function toRow(record: SqlRow): SolicitationRow {
   return {
     solicitationNumber: String(record.solicitation_number),
@@ -244,7 +288,6 @@ export class SolicitationDesk {
   }
 
   query(query: DeskQuery): SolicitationRow[] {
-    if (query.setAsides.length === 0) return [];
     const clauses = ["1 = 1"];
     const params: SQLInputValue[] = [];
     if (query.supplier === "hardware") {
@@ -255,8 +298,10 @@ export class SolicitationDesk {
     } else if (query.supplier === "medical") {
       clauses.push("fsc LIKE '65%'");
     }
-    clauses.push(`set_aside IN (${query.setAsides.map(() => "?").join(", ")})`);
-    params.push(...query.setAsides);
+    if (query.setAsides.length > 0) {
+      clauses.push(`set_aside IN (${query.setAsides.map(() => "?").join(", ")})`);
+      params.push(...query.setAsides);
+    }
     if (query.returnByOnOrBefore) {
       clauses.push("return_by <= ?");
       params.push(query.returnByOnOrBefore);
@@ -283,28 +328,91 @@ export class SolicitationDesk {
   async open(solicitationNumber: string): Promise<SolicitationBrief> {
     const existing = this.record(solicitationNumber);
     if (!existing) throw new Error(`Solicitation ${solicitationNumber} is not on the desk.`);
-    return {
-      ...toRow(existing),
-      issueDate: null,
-      status: null,
-      fullName: null,
-      deliverBy: null,
-      buyerName: null,
-      buyerEmail: null,
-      naics: null,
-      approvedSource: null,
-      automatedAward: null,
-      inspection: null,
-      buyAmerican: null,
-      lastPaid: null,
-      requirementCodes: [],
-      pdfAvailable: false,
-      recordPageUrl: recordPageUrl(solicitationNumber),
-      loadState: "ready",
-    };
+    if (existing.load_state === "ready") return toBrief(existing);
+    try {
+      const fetched = await this.gateway.fetchSolicitation(solicitationNumber);
+      const pdf = new Uint8Array(fetched.pdf);
+      const details = await readRecord(fetched.recordPageHtml, pdf);
+      this.db
+        .prepare(
+          `UPDATE solicitations SET
+            load_state = 'ready',
+            issue_date = ?,
+            status = ?,
+            full_name = ?,
+            deliver_by = ?,
+            buyer_name = ?,
+            buyer_email = ?,
+            naics = ?,
+            approved_company = ?,
+            approved_cage = ?,
+            approved_part = ?,
+            has_approved_source = ?,
+            automated_award = ?,
+            inspection = ?,
+            buy_american = ?,
+            last_unit_price = ?,
+            last_quantity = ?,
+            last_award_date = ?,
+            requirement_codes = ?,
+            pdf = ?
+          WHERE solicitation_number = ?`,
+        )
+        .run(
+          details.issueDate,
+          details.status,
+          details.fullName,
+          details.deliverBy,
+          details.buyerName,
+          details.buyerEmail,
+          details.naics,
+          details.approvedSource?.company ?? null,
+          details.approvedSource?.cage ?? null,
+          details.approvedSource?.partNumber ?? null,
+          details.approvedSource ? 1 : 0,
+          details.automatedAward === null ? null : details.automatedAward ? 1 : 0,
+          details.inspection,
+          details.buyAmerican === null ? null : details.buyAmerican ? 1 : 0,
+          details.lastPaid?.unitPrice ?? null,
+          details.lastPaid?.quantity ?? null,
+          details.lastPaid?.awardDate ?? null,
+          JSON.stringify(details.requirementCodes),
+          pdf,
+          solicitationNumber,
+        );
+      const saved = this.record(solicitationNumber);
+      if (!saved) throw new Error(`Solicitation ${solicitationNumber} is not on the desk.`);
+      return toBrief(saved);
+    } catch {
+      this.db
+        .prepare("UPDATE solicitations SET load_state = 'failed' WHERE solicitation_number = ?")
+        .run(solicitationNumber);
+      return {
+        ...toRow(existing),
+        issueDate: null,
+        status: null,
+        fullName: null,
+        deliverBy: null,
+        buyerName: null,
+        buyerEmail: null,
+        naics: null,
+        approvedSource: null,
+        automatedAward: null,
+        inspection: null,
+        buyAmerican: null,
+        lastPaid: null,
+        requirementCodes: [],
+        pdfAvailable: false,
+        recordPageUrl: recordPageUrl(solicitationNumber),
+        loadState: "failed",
+      };
+    }
   }
 
-  storedPdf(_solicitationNumber: string): Uint8Array | null {
+  storedPdf(solicitationNumber: string): Uint8Array | null {
+    const existing = this.record(solicitationNumber);
+    const pdf = existing?.pdf;
+    if (pdf instanceof Uint8Array) return pdf;
     return null;
   }
 

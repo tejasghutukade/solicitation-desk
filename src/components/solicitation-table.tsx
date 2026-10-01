@@ -1,64 +1,76 @@
-import { SET_ASIDE_LABELS } from "@/lib/desk/types";
+import { SET_ASIDE_LABELS, recordPageUrl } from "@/lib/desk/types";
 import type { SolicitationRow } from "@/lib/desk/types";
 import { formatDeskDate, isDueSoon } from "./format";
 
 export function SolicitationTable({
   rows,
+  loading,
   selectedNumber,
   hasMore,
   onOpen,
   onShowMore,
 }: {
   rows: SolicitationRow[];
+  loading: boolean;
   selectedNumber: string | null;
   hasMore: boolean;
   onOpen: (row: SolicitationRow) => void;
   onShowMore: () => void;
 }) {
+  if (loading) {
+    return (
+      <div className="scan-scroll" aria-hidden="true">
+        {Array.from({ length: 7 }, (_, index) => (
+          <div className="scan-skeleton" key={index} />
+        ))}
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return <p className="scan-empty">No solicitations match.</p>;
+  }
+
   return (
-    <div className="desk-table-scroll">
-      <table className="desk-table">
-        <thead>
-          <tr>
-            <th scope="col">Solicitation</th>
-            <th scope="col">NSN</th>
-            <th scope="col">Name</th>
-            <th scope="col" className="qty">
-              Qty
-            </th>
-            <th scope="col">Return by</th>
-            <th scope="col">Set-aside</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const selected = row.solicitationNumber === selectedNumber;
-            return (
-              <tr
-                key={row.solicitationNumber}
-                aria-selected={selected}
-                tabIndex={0}
+    <div className="scan-scroll">
+      <ul className="scan-list">
+        {rows.map((row) => {
+          const selected = row.solicitationNumber === selectedNumber;
+          const soon = isDueSoon(row.returnBy);
+          return (
+            <li key={row.solicitationNumber} className={selected ? "scan-item is-selected" : "scan-item"}>
+              <button
+                type="button"
+                className="scan-row"
+                aria-pressed={selected}
                 onClick={() => onOpen(row)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onOpen(row);
-                  }
-                }}
               >
-                <td className="mono nowrap">{row.solicitationNumber}</td>
-                <td className="mono nowrap">{row.nsn}</td>
-                <td>{row.shortName}</td>
-                <td className="qty">{quantityAndUnit(row)}</td>
-                <td className={isDueSoon(row.returnBy) ? "is-stamp nowrap" : "nowrap"}>
-                  {formatDeskDate(row.returnBy)}
-                </td>
-                <td>{SET_ASIDE_LABELS[row.setAside]}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                <span className="scan-main">
+                  <span className="scan-name">{row.shortName}</span>
+                  <span className="scan-meta mono">
+                    {row.solicitationNumber}
+                    <span className="scan-dot" aria-hidden="true" />
+                    {row.nsn}
+                  </span>
+                </span>
+                <span className="scan-side">
+                  <span className={soon ? "scan-date is-stamp" : "scan-date"}>{formatDeskDate(row.returnBy)}</span>
+                  <span className="scan-chip">{SET_ASIDE_LABELS[row.setAside]}</span>
+                  <span className="scan-qty">{quantityAndUnit(row)}</span>
+                </span>
+              </button>
+              <a
+                className="scan-dibbs"
+                href={recordPageUrl(row.solicitationNumber)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                DIBBS page
+              </a>
+            </li>
+          );
+        })}
+      </ul>
       {hasMore ? (
         <div className="desk-more">
           <button type="button" className="desk-text-button" onClick={onShowMore}>

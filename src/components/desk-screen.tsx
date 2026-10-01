@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { listSolicitations, openSolicitation } from "@/app/actions";
-import { EVERY_SET_ASIDE, openingQuery } from "@/lib/desk/types";
+import { EVERY_SET_ASIDE } from "@/lib/desk/types";
 import type { DeskQuery, SetAside, SolicitationBrief, SolicitationRow, Supplier } from "@/lib/desk/types";
 import { BriefPane } from "./brief-pane";
 import { FilterStrip } from "./filter-strip";
@@ -56,7 +56,12 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
     if (supplier === query.supplier) return;
     openSeq.current += 1;
     setSelection(null);
-    setQuery(openingQuery(supplier));
+    setQuery((current) => ({ ...current, supplier }));
+  }
+
+  function closeBrief() {
+    openSeq.current += 1;
+    setSelection(null);
   }
 
   function openRow(row: SolicitationRow) {
@@ -77,7 +82,7 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
   const visibleRows = (rows ?? []).slice(0, visible);
 
   return (
-    <main className="desk">
+    <main className={selection ? "desk is-open" : "desk"}>
       <section className="desk-list" aria-label="Solicitations">
         <div className="desk-list-head">
           <h1>Solicitation desk</h1>
@@ -116,23 +121,25 @@ export function DeskScreen({ initialQuery }: { initialQuery: DeskQuery }) {
         />
         <SolicitationTable
           rows={visibleRows}
+          loading={rows === null && !listError}
           selectedNumber={selection?.row.solicitationNumber ?? null}
           hasMore={rows !== null && rows.length > visible}
           onOpen={openRow}
           onShowMore={() => setVisible((count) => count + PAGE_SIZE)}
         />
       </section>
-      <section className="desk-brief" aria-label="Brief" aria-busy={selection?.reading ?? false}>
-        <BriefPane
-          row={selection?.row ?? null}
-          brief={selection?.brief ?? null}
-          reading={selection?.reading ?? false}
-          failed={selection?.failed ?? false}
-          onRetry={() => {
-            if (selection) openRow(selection.row);
-          }}
-        />
-      </section>
+      {selection ? (
+        <section className="desk-brief" aria-label="Brief" aria-busy={selection.reading}>
+          <BriefPane
+            row={selection.row}
+            brief={selection.brief}
+            reading={selection.reading}
+            failed={selection.failed}
+            onClose={closeBrief}
+            onRetry={() => openRow(selection.row)}
+          />
+        </section>
+      ) : null}
     </main>
   );
 }

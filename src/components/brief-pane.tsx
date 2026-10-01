@@ -1,4 +1,4 @@
-import { SET_ASIDE_LABELS } from "@/lib/desk/types";
+import { SET_ASIDE_LABELS, recordPageUrl } from "@/lib/desk/types";
 import type { SolicitationBrief, SolicitationRow } from "@/lib/desk/types";
 import { formatDeskDate, formatDeskDateOrBlank, isDueSoon, statusLooksOpen, yesNo } from "./format";
 
@@ -7,33 +7,48 @@ export function BriefPane({
   brief,
   reading,
   failed,
+  onClose,
   onRetry,
 }: {
-  row: SolicitationRow | null;
+  row: SolicitationRow;
   brief: SolicitationBrief | null;
   reading: boolean;
   failed: boolean;
+  onClose: () => void;
   onRetry: () => void;
 }) {
-  if (!row) {
-    return (
-      <div className="brief-empty">
-        <h2>Select a solicitation</h2>
-        <p>The list stays up while you read.</p>
-      </div>
-    );
-  }
-
   const view = brief ?? row;
   const ready = brief?.loadState === "ready" ? brief : null;
   const name = ready?.fullName?.trim() ? ready.fullName : view.shortName;
   const soon = isDueSoon(view.returnBy);
 
+  const pageUrl = brief?.recordPageUrl || recordPageUrl(row.solicitationNumber);
+
   return (
     <div className="brief-body">
-      <p className="return-eyebrow">Return by</p>
+      <div className="brief-toolbar">
+        <p className="return-eyebrow">Return by</p>
+        <button type="button" className="desk-text-button" onClick={onClose}>
+          Close
+        </button>
+      </div>
       <p className={soon ? "return-stamp is-stamp" : "return-stamp"}>{formatDeskDate(view.returnBy)}</p>
-      {reading ? <p className="brief-note">Reading the solicitation…</p> : null}
+      <div className="brief-actions">
+        <a className="brief-action" href={pageUrl} target="_blank" rel="noreferrer">
+          DIBBS page
+        </a>
+        {brief?.pdfAvailable ? (
+          <a className="brief-action brief-action-pdf" href={`/pdf/${encodeURIComponent(brief.solicitationNumber)}`}>
+            Saved PDF
+          </a>
+        ) : null}
+      </div>
+      {reading ? (
+        <p className="fetch-status" role="status">
+          <span className="spinner" aria-hidden="true" />
+          Fetching the record
+        </p>
+      ) : null}
       {failed && !reading ? (
         <div className="brief-fail">
           <p>The full record could not be loaded.</p>
@@ -98,20 +113,6 @@ export function BriefPane({
           </>
         ) : null}
       </dl>
-      {brief && (brief.pdfAvailable || brief.recordPageUrl) ? (
-        <div className="brief-links">
-          {brief.pdfAvailable ? (
-            <a className="desk-link" href={`/pdf/${encodeURIComponent(brief.solicitationNumber)}`}>
-              Saved PDF
-            </a>
-          ) : null}
-          {brief.recordPageUrl ? (
-            <a className="desk-link" href={brief.recordPageUrl} target="_blank" rel="noreferrer">
-              DIBBS page
-            </a>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }

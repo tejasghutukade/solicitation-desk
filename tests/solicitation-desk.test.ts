@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import type { DibbsGateway } from "../src/lib/desk/gateway.ts";
 import { SolicitationDesk } from "../src/lib/desk/solicitation-desk.ts";
 import { openingQuery, recordPageUrl, type DeskQuery } from "../src/lib/desk/types.ts";
@@ -187,6 +188,10 @@ test("opening queries keep each shop on its classes and set-asides", () => {
     setAsides: [...openingQuery("hardware").setAsides, "N"],
   };
   assert.deepEqual(numbers(desk.query(hardwareWithUnrestricted)), ["SPE1C126T1746", "SPE5A126T5310"]);
+  assert.deepEqual(numbers(desk.query({ ...openingQuery("hardware"), setAsides: [] })), [
+    "SPE1C126T1746",
+    "SPE5A126T5310",
+  ]);
 });
 
 test("search and date filters stay inside the shop that is open", () => {
@@ -270,51 +275,112 @@ test("ensureReady leaves a stored index alone and rejects an empty failed start"
   await assert.rejects(() => blank.ensureReady(), /DIBBS/);
 });
 
-test("opening a row returns the index fields and does not call the gateway", async () => {
+async function pdfWith(lines: string[]): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([640, 900]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  lines.forEach((line, index) => {
+    page.drawText(line, { x: 36, y: 860 - index * 16, font, size: 10 });
+  });
+  return doc.save();
+}
+
+const OPEN_HTML = "<span style='color:#000099'>Open</span>";
+
+test("opening a row fetches the record once and keeps it", async () => {
   let calls = 0;
+  const pdf = await pdfWith([
+    "DATE ISSUED",
+    "2026 AUG 25",
+    "Name: JANE DOE Buyer Code:AB123 Tel: 1",
+    "Email: jane.doe@dla.mil",
+    "DELIVER BY (Date)",
+    "15 DAYS ADO",
+    "ITEM DESCRIPTION BOLT,MACHINE BOLT, MACHINE *",
+    "NORTH AMERICAN INDUSTRY CLASSIFICATION SYSTEM 332722",
+    "INSPECTION POINT: ORIGIN",
+    "BUY AMERICAN AND BALANCE OF PAYMENTS PROGRAM, APPLIES",
+    "Procurement History for NSN/FSC:123/5305",
+    "CAGE Contract Number Quantity Unit Cost AWD Date",
+    "1AB23 SPE1C126P0001 10.000 1.25000 20250115",
+    "CRITICAL APPLICATION ITEM",
+    "ACME FASTENER 1AB23 P/N ACME-44",
+    "RA001",
+  ]);
   const desk = newDesk({
     async fetchRecentIndexFiles() {
-      calls += 1;
       return [];
     },
     async fetchSolicitation() {
       calls += 1;
-      throw new Error("not used");
+      return { recordPageHtml: OPEN_HTML, pdf };
     },
   });
   desk.ingestIndexFile("in260401.txt", INDEX_260401);
   const brief = await desk.open("SPE1C126T1746");
-  assert.equal(calls, 0);
-  assert.deepEqual(brief, {
-    solicitationNumber: "SPE1C126T1746",
-    nsn: "5305012345678",
-    shortName: "BOLT,MACHINE",
-    quantity: 10,
-    unit: "EA",
-    returnBy: "2026-04-15",
-    setAside: "Y",
-    postedDate: "2026-04-01",
-    issueDate: null,
-    status: null,
-    fullName: null,
-    deliverBy: null,
-    buyerName: null,
-    buyerEmail: null,
-    naics: null,
-    approvedSource: null,
-    automatedAward: null,
-    inspection: null,
-    buyAmerican: null,
-    lastPaid: null,
-    requirementCodes: [],
-    pdfAvailable: false,
-    recordPageUrl: recordPageUrl("SPE1C126T1746"),
-    loadState: "ready",
-  });
-  assert.equal(desk.storedPdf("SPE1C126T1746"), null);
+  assert.equal(calls, 1);
+  assert.equal(brief.solicitationNumber, "SPE1C126T1746");
+  assert.equal(brief.quantity, 10);
+  assert.equal(brief.issueDate, "2026-08-25");
+  assert.equal(brief.status, "Open");
+  assert.equal(brief.fullName, "BOLT, MACHINE");
+  assert.equal(brief.deliverBy, "15 DAYS ADO");
+  assert.equal(brief.buyerName, "JANE DOE");
+  assert.equal(brief.buyerEmail, "jane.doe@dla.mil");
+  assert.equal(brief.naics, "332722");
+  assert.deepEqual(brief.approvedSource, { company: "ACME FASTENER", cage: "1AB23", partNumber: "ACME-44" });
+  assert.equal(brief.inspection, "ORIGIN");
+  assert.equal(brief.buyAmerican, true);
+  assert.equal(brief.automatedAward, null);
+  assert.deepEqual(brief.lastPaid, { unitPrice: "1.25000", quantity: "10", awardDate: "2025-01-15" });
+  assert.deepEqual(brief.requirementCodes, ["RA001"]);
+  assert.equal(brief.pdfAvailable, true);
+  assert.equal(brief.recordPageUrl, recordPageUrl("SPE1C126T1746"));
+  assert.equal(brief.loadState, "ready");
+  assert.ok(desk.storedPdf("SPE1C126T1746")?.byteLength);
+
   const again = await desk.open("SPE1C126T1746");
-  assert.equal(calls, 0);
-  assert.equal(again.loadState, "ready");
-  assert.equal(again.pdfAvailable, false);
-  assert.equal(desk.storedPdf("SPE1C126T1746"), null);
+  assert.equal(calls, 1);
+  assert.equal(again.buyerName, "JANE DOE");
+
+  const quiet = await pdfWith(["DATE ISSUED", "2026 MAY 02", "ITEM DESCRIPTION BANDAGE *"]);
+  const medical = newDesk({
+    async fetchRecentIndexFiles() {
+      return [];
+    },
+    async fetchSolicitation() {
+      return { recordPageHtml: OPEN_HTML, pdf: quiet };
+    },
+  });
+  medical.ingestIndexFile("in260401.txt", INDEX_260401);
+  const bandage = await medical.open("SPE2A126T9999");
+  assert.equal(bandage.lastPaid, null);
+  assert.equal(bandage.issueDate, "2026-05-02");
+});
+
+test("a failed record fetch keeps the index fields and a later open can replace it", async () => {
+  let calls = 0;
+  const pdf = await pdfWith(["DATE ISSUED", "2026 AUG 25", "Name: JANE DOE Buyer Code:AB123"]);
+  const desk = newDesk({
+    async fetchRecentIndexFiles() {
+      return [];
+    },
+    async fetchSolicitation() {
+      calls += 1;
+      if (calls === 1) throw new Error("offline");
+      return { recordPageHtml: OPEN_HTML, pdf };
+    },
+  });
+  desk.ingestIndexFile("in260401.txt", INDEX_260401);
+  const failed = await desk.open("SPE1C126T1746");
+  assert.equal(failed.loadState, "failed");
+  assert.equal(failed.shortName, "BOLT,MACHINE");
+  assert.equal(failed.returnBy, "2026-04-15");
+  assert.equal(failed.buyerName, null);
+  assert.equal(failed.pdfAvailable, false);
+  const ready = await desk.open("SPE1C126T1746");
+  assert.equal(calls, 2);
+  assert.equal(ready.loadState, "ready");
+  assert.equal(ready.buyerName, "JANE DOE");
+  assert.equal(ready.issueDate, "2026-08-25");
 });
